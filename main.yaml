@@ -96,6 +96,11 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
 
   PrjPedroALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -117,15 +122,13 @@ Resources:
       HealthCheckIntervalSeconds: 30
       HealthCheckPath: /
       HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
+      HealthCheckTimeoutSeconds: 10
       HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 2
-      Matcher:
-        HttpCode: 200-399
       Name: PrjPedroTargetGroup
       Port: 80
       Protocol: HTTP
       TargetType: instance
+      UnhealthyThresholdCount: 2
       VpcId: !Ref PrjPedroVPC
 
   PrjPedroALBListener:
@@ -153,7 +156,7 @@ Resources:
           sudo apt-get update -y
           sudo apt-get install -y python3-pip git
           sudo pip3 install flask boto3
-          sudo mkdir /opt/app
+          sudo mkdir -p /opt/app
           sudo git clone https://github.com/PedroHrc1/AplicacaoCloud.git /opt/app
           nohup python3 /opt/app/flask_form/main.py > /var/log/main.log 2>&1 &
 
