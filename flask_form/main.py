@@ -14,7 +14,7 @@ dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 table = dynamodb.Table('TabelaDynamoDB')
 
 @app.route('/', methods=['GET', 'POST'])
-def form():
+def tabela_aluno():
     nomeAluno = None
     nota = None
     all_entries = []
