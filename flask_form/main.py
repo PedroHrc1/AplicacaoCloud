@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.DEBUG)
 app = Flask(__name__)
 
 # Configurar boto3 para se conectar ao DynamoDB
-dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+dynamodb = boto3.resource('dynamodb', region_name='us-east-1a')
 table = dynamodb.Table('PrjPedroDynamoDBTable')
 
 @app.route('/', methods=['GET', 'POST'])

@@ -155,7 +155,7 @@ Resources:
           sudo pip3 install flask boto3
           sudo mkdir /opt/app
           sudo git clone https://github.com/PedroHrc1/AplicacaoCloud.git /opt/app
-          nohup python3 /opt/app/app.py > /var/log/app.log 2>&1 &
+          nohup python3 /opt/app/flask_form/main.py > /var/log/main.log 2>&1 &
 
   PrjPedroAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
