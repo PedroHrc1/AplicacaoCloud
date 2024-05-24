@@ -3,71 +3,96 @@ Description: Projeto Computação em nuvem - Cloudformation
 
 Parameters:
   KeyName:
-    Description: 'Nome do par de chaves SSH para acessar as instâncias'
-    Type: 'AWS::EC2::KeyPair::KeyName'
-    ConstraintDescription: 'ChaveCloud'
+    Type: String
+    Description: myKey
 
 Resources:
-  PrjPedroVPC:
+  VPCPrincipal:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: "10.0.0.0/16"
 
-  PrjPedroInternetGateway:
+  InternetGatewayPrincipal:
     Type: AWS::EC2::InternetGateway
 
-  PrjPedroGatewayAttachment:
+  ConexaoGateway:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
-      VpcId: !Ref PrjPedroVPC
-      InternetGatewayId: !Ref PrjPedroInternetGateway
+      VpcId: !Ref VPCPrincipal
+      InternetGatewayId: !Ref InternetGatewayPrincipal
 
-  PrjPedroPublicRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref PrjPedroVPC
-
-  PrjPedroPublicRoute:
-    Type: AWS::EC2::Route
-    DependsOn: PrjPedroGatewayAttachment
-    Properties:
-      RouteTableId: !Ref PrjPedroPublicRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref PrjPedroInternetGateway
-
-  PrjPedroSubnet1:
+  Subrede1:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref PrjPedroVPC
+      VpcId: !Ref VPCPrincipal
       AvailabilityZone: us-east-1a
       CidrBlock: "10.0.0.0/24"
       MapPublicIpOnLaunch: true
   
-  PrjPedroSubnet2:
+  Subrede2:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref PrjPedroVPC
+      VpcId: !Ref VPCPrincipal
       AvailabilityZone: us-east-1b
       CidrBlock: "10.0.2.0/24"
       MapPublicIpOnLaunch: true
 
-  PrjPedroSubnetRouteTableAssociation1:
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPCPrincipal
+
+  RotaInternetPublica:
+    Type: AWS::EC2::Route
+    DependsOn: ConexaoGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGatewayPrincipal
+
+  AssociacaoSubrede1:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PrjPedroSubnet1
-      RouteTableId: !Ref PrjPedroPublicRouteTable
+      SubnetId: !Ref Subrede1
+      RouteTableId: !Ref PublicRouteTable
 
-  PrjPedroSubnetRouteTableAssociation2:
+  AssociacaoSubrede2:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PrjPedroSubnet2
-      RouteTableId: !Ref PrjPedroPublicRouteTable
+      SubnetId: !Ref Subrede2
+      RouteTableId: !Ref PublicRouteTable
 
-  PrjPedroInstanceSecurityGroup:
+  GrupoSegurancaALB:
     Type: AWS::EC2::SecurityGroup
     Properties:
+      GroupDescription: Security group for ALB
+      VpcId: !Ref VPCPrincipal
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  ALBPrincipal:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: ALBPrincipal
+      Subnets: 
+        - !Ref Subrede1
+        - !Ref Subrede2
+      SecurityGroups:
+        - !Ref GrupoSegurancaALB
+      Scheme: internet-facing
+      Tags:
+        - Key: Name
+          Value: ALBPrincipal
+  
+  GrupoSegurancaInstancia:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: launch-wizard
       GroupDescription: launch-wizard created
-      VpcId: !Ref PrjPedroVPC
+      VpcId: !Ref VPCPrincipal
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
@@ -86,111 +111,57 @@ Resources:
           ToPort: 5000
           CidrIp: 0.0.0.0/0
 
-  PrjPedroALBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for ALB
-      VpcId: !Ref PrjPedroVPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          FromPort: -1
-          ToPort: -1
-          CidrIp: 0.0.0.0/0
-
-  PrjPedroALB:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Name: PrjPedroALB
-      Subnets: 
-        - !Ref PrjPedroSubnet1
-        - !Ref PrjPedroSubnet2
-      SecurityGroups:
-        - !Ref PrjPedroALBSecurityGroup
-      Scheme: internet-facing
-      Tags:
-        - Key: Name
-          Value: PrjPedroALB
-
-  PrjPedroTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckIntervalSeconds: 30
-      HealthCheckPath: /
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 10
-      HealthyThresholdCount: 2
-      Name: PrjPedroTargetGroup
-      Port: 80
-      Protocol: HTTP
-      TargetType: instance
-      UnhealthyThresholdCount: 2
-      VpcId: !Ref PrjPedroVPC
-
-  PrjPedroALBListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref PrjPedroTargetGroup
-      LoadBalancerArn: !Ref PrjPedroALB
-      Port: 80
-      Protocol: HTTP
-
-  PrjPedroLaunchConfiguration:
+  ConfiguracaoLancamento:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
-      ImageId: ami-04b70fa74e45c3917
+      ImageId: ami-0f30a9c3a48f3fa79
       InstanceType: t2.micro
       KeyName: !Ref KeyName
       SecurityGroups:
-        - !Ref PrjPedroInstanceSecurityGroup
-      IamInstanceProfile: !Ref PrjPedroInstanceProfile
+        - !Ref GrupoSegurancaInstancia
+        - !Ref GrupoSegurancaALB
+      IamInstanceProfile: !Ref PerfilAcessoDynamoDB
       UserData:
         Fn::Base64: |
           #!/bin/bash
           sudo apt-get update -y
           sudo apt-get install -y python3-pip git
           sudo pip3 install flask boto3
-          sudo mkdir -p /opt/app
+          sudo mkdir /opt/app
           sudo git clone https://github.com/PedroHrc1/AplicacaoCloud.git /opt/app
           nohup python3 /opt/app/flask_form/main.py > /var/log/main.log 2>&1 &
 
-  PrjPedroAutoScalingGroup:
+  GrupoAutoScaling:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       AvailabilityZones: [us-east-1a, us-east-1b]
-      LaunchConfigurationName: !Ref PrjPedroLaunchConfiguration
+      LaunchConfigurationName: !Ref ConfiguracaoLancamento
       MinSize: 2
       MaxSize: 7
       DesiredCapacity: 3
       VPCZoneIdentifier:
-        - !Ref PrjPedroSubnet1
-        - !Ref PrjPedroSubnet2
+        - !Ref Subrede1
+        - !Ref Subrede2
       TargetGroupARNs:
-        - !Ref PrjPedroTargetGroup  
+        - !Ref GrupoAlvo  
       HealthCheckType: ELB
       HealthCheckGracePeriod: 300
       Tags:
         - Key: Name
-          Value: PrjPedroAutoScalingGroup
+          Value: GrupoAutoScaling
           PropagateAtLaunch: true
 
-  PrjPedroScalingPolicy:
+  PoliticaEscalonamento:
     Type: AWS::AutoScaling::ScalingPolicy
     Properties:
-      AutoScalingGroupName: !Ref PrjPedroAutoScalingGroup
+      AutoScalingGroupName: !Ref GrupoAutoScaling
       PolicyType: TargetTrackingScaling
       TargetTrackingConfiguration:
         TargetValue: 70.0  
         PredefinedMetricSpecification:
           PredefinedMetricType: ASGAverageCPUUtilization
   
-  PrjPedroCPUAlarm:
+  AlarmeCPU:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmDescription: "Alarme de utilização da CPU excedendo 70%"
@@ -198,19 +169,44 @@ Resources:
       MetricName: CPUUtilization
       Dimensions:
         - Name: AutoScalingGroupName
-          Value: !Ref PrjPedroAutoScalingGroup
+          Value: !Ref GrupoAutoScaling
       Statistic: Average
       Period: 60
       EvaluationPeriods: 5
       Threshold: 70
       ComparisonOperator: GreaterThanOrEqualToThreshold
       AlarmActions:
-        - !Ref PrjPedroScalingPolicy
+        - !Ref PoliticaEscalonamento
 
-  PrjPedroDynamoDBTable:
+  ListenerALB:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref GrupoAlvo
+      LoadBalancerArn: !Ref ALBPrincipal
+      Port: 80
+      Protocol: HTTP
+
+  GrupoAlvo:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      Name: GrupoAlvo
+      Port: 80
+      Protocol: HTTP
+      TargetType: instance
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VPCPrincipal
+
+  TabelaDynamoDB:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: PrjPedroDynamoDBTable
+      TableName: TabelaDynamoDB
       AttributeDefinitions:
         - AttributeName: id
           AttributeType: S
@@ -221,18 +217,18 @@ Resources:
         ReadCapacityUnits: 5
         WriteCapacityUnits: 5
 
-  PrjPedroDynamoDBSecurityGroup:
+  GrupoSegurancaDynamoDB:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Security group for DynamoDB
-      VpcId: !Ref PrjPedroVPC
+      VpcId: !Ref VPCPrincipal
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          SourceSecurityGroupId: !Ref PrjPedroInstanceSecurityGroup
+          SourceSecurityGroupId: !Ref GrupoSegurancaInstancia
 
-  PrjPedroDynamoDBRole:
+  RoleAcessoDynamoDB:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -243,7 +239,7 @@ Resources:
               Service: ec2.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: PrjPedroDynamoDBAccessPolicy
+        - PolicyName: DynamoDBAccessPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -260,26 +256,26 @@ Resources:
                   - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: !GetAtt PrjPedroDynamoDBTable.Arn
+                Resource: !GetAtt TabelaDynamoDB.Arn
 
-  PrjPedroInstanceProfile:
+  PerfilAcessoDynamoDB:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      Roles: [!Ref PrjPedroDynamoDBRole]
+      Roles: [!Ref RoleAcessoDynamoDB]
 
-  PrjPedroVPCEndpoint:
+  VPCEndpointDynamoDB:
     Type: AWS::EC2::VPCEndpoint
     Properties:
       ServiceName: com.amazonaws.us-east-1.dynamodb
-      VpcId: !Ref PrjPedroVPC
+      VpcId: !Ref VPCPrincipal
       RouteTableIds:
-        - !Ref PrjPedroPublicRouteTable
+        - !Ref PublicRouteTable
       VpcEndpointType: Gateway
 
 Outputs:
-  PrjPedroAutoScalingGroupId:
+  GrupoAutoScalingId:
     Description: "ID do Grupo de Auto Scaling"
-    Value: !Ref PrjPedroAutoScalingGroup
-  PrjPedroALBDNSName:
+    Value: !Ref GrupoAutoScaling
+  ALBDNSName:
     Description: "DNS Name of the ALB"
-    Value: !GetAtt PrjPedroALB.DNSName
+    Value: !GetAtt ALBPrincipal.DNSName
