@@ -91,7 +91,7 @@ aws ec2 create-key-pair --key-name ChaveCloud --query 'KeyMaterial' --output tex
 ```
 Em Segundo:
 ```Bash
-aws cloudformation create-stack --stack-name <NomeDaSuaStack> --template-body file://template.yaml --parameters ParameterKey=KeyName,ParameterValue=ChaveCloud --capabilities CAPABILITY_NAMED_IAM
+aws cloudformation create-stack --stack-name <NomeDaSuaStack> --template-body file://main.yaml --parameters ParameterKey=KeyName,ParameterValue=ChaveCloud --capabilities CAPABILITY_NAMED_IAM
 ```
 
 Link para o repositorio: https://github.com/PedroHrc1/AplicacaoCloud
