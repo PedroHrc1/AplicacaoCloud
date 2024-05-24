@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Infraestrutura completa utilizando AWS CloudFormation: EC2 com Auto Scaling, ALB e DynamoDB'
+Description: 'Infraestrutura completa utilizando AWS CloudFormation: EC2 com Auto Scaling, ALB, DynamoDB e Lambda CRUD'
 
 Parameters:
   InstanceType:
@@ -12,8 +12,13 @@ Parameters:
     Default: ami-04b70fa74e45c3917
     Description: ID da AMI com a aplicação pré-instalada
 
-
 Resources:
+  # S3 Bucket para armazenar o código Lambda
+  LambdaS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-lambda-code
+
   # VPC
   VPC:
     Type: AWS::EC2::VPC
@@ -112,6 +117,18 @@ Resources:
           ToPort: 80
           CidrIp: 0.0.0.0/0
 
+  # Security Group for ALB
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP access from the internet
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
   # Security Group for DynamoDB
   DynamoDBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -137,25 +154,47 @@ Resources:
         ReadCapacityUnits: 5
         WriteCapacityUnits: 5
 
-  # Launch Template
-  LaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
-    Properties: 
-      LaunchTemplateName: !Sub ${AWS::StackName}-launch-template
-      LaunchTemplateData:
-        InstanceType: !Ref InstanceType
-        SecurityGroupIds: 
-          - !Ref EC2SecurityGroup
-        ImageId: !Ref AmiId
-        UserData: !Base64 |
-          #!/bin/bash
-          apt-get update -y
-          apt-get install -y nginx curl
-          systemctl start nginx
-          systemctl enable nginx
-          mkdir -p /var/www/html/styles
-          curl -o /var/www/html/index.html https://raw.githubusercontent.com/PedroHrc1/AplicacaoCloud/main/definitely-not-a-rickroll-main/index.html
-          curl -o /var/www/html/styles/index_style.css https://raw.githubusercontent.com/PedroHrc1/AplicacaoCloud/main/definitely-not-a-rickroll-main/styles/index_style.css
+  # IAM Role for Lambda
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBCrudPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AWS::StackName}-table
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+  # Lambda Function for CRUD Operations
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-crud-function
+      Handler: CRUD.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.8
+      Code:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: lambda_function.zip
 
   # ALB
   ALB:
@@ -166,7 +205,7 @@ Resources:
         - !Ref Subnet1
         - !Ref Subnet2
       SecurityGroups:
-        - !Ref EC2SecurityGroup
+        - !Ref ALBSecurityGroup
 
   # ALB Target Group
   ALBTargetGroup:
@@ -192,6 +231,26 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref ALBTargetGroup
+
+  # Launch Template
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub ${AWS::StackName}-launch-template
+      LaunchTemplateData:
+        InstanceType: !Ref InstanceType
+        SecurityGroupIds:
+          - !Ref EC2SecurityGroup
+        ImageId: !Ref AmiId
+        UserData: !Base64 |
+          #!/bin/bash
+          apt-get update -y
+          apt-get install -y nginx curl
+          systemctl start nginx
+          systemctl enable nginx
+          mkdir -p /var/www/html/styles
+          curl -o /var/www/html/index.html https://raw.githubusercontent.com/PedroHrc1/AplicacaoCloud/main/definitely-not-a-rickroll-main/index.html
+          curl -o /var/www/html/styles/index_style.css https://raw.githubusercontent.com/PedroHrc1/AplicacaoCloud/main/definitely-not-a-rickroll-main/styles/index_style.css
 
   # Auto Scaling Group
   AutoScalingGroup:
@@ -224,7 +283,166 @@ Resources:
           PredefinedMetricType: ASGAverageCPUUtilization
         TargetValue: 70.0
 
+  # API Gateway for Lambda CRUD Operations
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub ${AWS::StackName}-api
+      Description: API Gateway for Lambda CRUD operations
+
+  ApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: items
+      RestApiId: !Ref ApiGateway
+
+  ApiGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: ANY
+      ResourceId: !Ref ApiGatewayResource
+      RestApiId: !Ref ApiGateway
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunction.Arn}/invocations
+
+  LambdaApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref LambdaFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/*
+
+  # CodePipeline Role
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodePipelinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                  - s3:PutBucketVersioning
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuildProjects
+                Resource: '*'
+
+  # CodeBuild Role
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                  - s3:PutBucketVersioning
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuildProjects
+                Resource: '*'
+
+  # CodeBuild Project
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-build-project
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:5.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: S3_BUCKET
+            Value: !Ref LambdaS3Bucket
+          - Name: S3_KEY
+            Value: lambda_function.zip
+      Source:
+        Type: CODEPIPELINE
+      SourceVersion: !Ref GitHubBranch
+
+  # CodePipeline
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub ${AWS::StackName}-pipeline
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                Owner: !Sub ${GitHubRepo.split('/')[0]}
+                Repo: !Sub ${GitHubRepo.split('/')[1]}
+                Branch: !Ref GitHubBranch
+                OAuthToken: !Ref GitHubToken
+        - Name: Build
+          Actions:
+            - Name: BuildAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+
 Outputs:
   ALBDNSName:
     Description: "DNS Name of the load balancer"
     Value: !GetAtt ALB.DNSName
+
+  ApiUrl:
+    Description: "URL of the API Gateway"
+    Value: !Sub https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/items

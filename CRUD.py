@@ -3,7 +3,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 dynamodb = boto3.resource('dynamodb')
-table_name = 'YOUR_TABLE_NAME'  # Substitua por: ${AWS::StackName}-table
+table_name = '${AWS::StackName}-table'  # Substitua por: ${AWS::StackName}-table
 
 def handler(event, context):
     table = dynamodb.Table(table_name)
